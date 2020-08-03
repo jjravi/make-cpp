@@ -45,7 +45,7 @@ rem Echo ON so they will see what is going on.
 @echo on
 gcc -c -I./src -I%XSRC%/src -I./lib -I%XSRC%/lib -DHAVE_CONFIG_H -O2 -g %XSRC%/src/commands.c -o commands.o
 gcc -c -I./src -I%XSRC%/src -I./lib -I%XSRC%/lib -DHAVE_CONFIG_H -O2 -g %XSRC%/src/output.c -o output.o
-gcc -c -I./src -I%XSRC%/src -I./lib -I%XSRC%/lib -DHAVE_CONFIG_H -O2 -g %XSRC%/src/job.c -o job.o
+gcc -c -I./src -I%XSRC%/src -I./lib -I%XSRC%/lib -DHAVE_CONFIG_H -O2 -g %XSRC%/src/job.cc -o job.o
 gcc -c -I./src -I%XSRC%/src -I./lib -I%XSRC%/lib -DHAVE_CONFIG_H -O2 -g %XSRC%/src/dir.c -o dir.o
 gcc -c -I./src -I%XSRC%/src -I./lib -I%XSRC%/lib -DHAVE_CONFIG_H -O2 -g %XSRC%/src/file.c -o file.o
 gcc -c -I./src -I%XSRC%/src -I./lib -I%XSRC%/lib -DHAVE_CONFIG_H -O2 -g %XSRC%/src/misc.c -o misc.o

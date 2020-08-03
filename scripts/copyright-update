@@ -42,7 +42,7 @@ run () {
     "$cmd" $(getfiles)
 
     echo "*** Update doc/make.texi copyright by hand!"
-    echo "*** Update src/main.c:print_version() copyright by hand!"
+    echo "*** Update src/main.cc:print_version() copyright by hand!"
 
     exit 0
 }

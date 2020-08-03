@@ -24,7 +24,7 @@ print MAKEFILE "vpath %.h $workdir\n";
 print MAKEFILE "objects = main.o kbd.o commands.o display.o insert.o\n";
 print MAKEFILE "edit:  \$(objects)\n";
 print MAKEFILE "\t\@echo cc -o \$@ \$^\n";
-print MAKEFILE "main.o : main.c defs.h\n";
+print MAKEFILE "main.o : main.cc defs.h\n";
 print MAKEFILE "\t\@echo cc -c \$(firstword \$^)\n";
 print MAKEFILE "kbd.o : kbd.c defs.h command.h\n";
 print MAKEFILE "\t\@echo cc -c kbd.c\n";
@@ -40,7 +40,7 @@ print MAKEFILE "\t\@echo cc -c insert.c\n";
 close(MAKEFILE);
 
 
-@files_to_touch = ("$workdir${pathsep}main.c","$workdir${pathsep}defs.h",
+@files_to_touch = ("$workdir${pathsep}main.cc","$workdir${pathsep}defs.h",
                "$workdir${pathsep}kbd.c","$workdir${pathsep}command.h",
                "$workdir${pathsep}commands.c","$workdir${pathsep}display.c",
                "$workdir${pathsep}buffer.h","$workdir${pathsep}insert.c",
@@ -51,7 +51,7 @@ close(MAKEFILE);
 &run_make_with_options($makefile,"",&get_logfile);
 
 # Create the answer to what should be produced by this Makefile
-$answer = "cc -c $workdir${pathsep}main.c\ncc -c kbd.c\ncc -c commands.c\n"
+$answer = "cc -c $workdir${pathsep}main.cc\ncc -c kbd.c\ncc -c commands.c\n"
          ."cc -c display.c\n"
          ."cc -c insert.c\ncc -o edit main.o kbd.o commands.o display.o "
          ."insert.o\n";

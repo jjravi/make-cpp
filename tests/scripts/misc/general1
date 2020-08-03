@@ -13,8 +13,8 @@ edit:  main.o kbd.o commands.o display.o \\
        insert.o
 \t\@echo cc -o edit main.o kbd.o commands.o display.o \\
                   insert.o
-main.o : main.c defs.h
-\t\@echo cc -c main.c
+main.o : main.cc defs.h
+\t\@echo cc -c main.cc
 kbd.o : kbd.c defs.h command.h
 \t\@echo cc -c kbd.c
 commands.o : command.c defs.h command.h
@@ -28,7 +28,7 @@ EOF
 close(MAKEFILE);
 
 
-@files_to_touch = ("$workdir${pathsep}main.c","$workdir${pathsep}defs.h",
+@files_to_touch = ("$workdir${pathsep}main.cc","$workdir${pathsep}defs.h",
                "$workdir${pathsep}kbd.c","$workdir${pathsep}command.h",
                "$workdir${pathsep}commands.c","$workdir${pathsep}display.c",
                "$workdir${pathsep}buffer.h","$workdir${pathsep}insert.c",
@@ -39,7 +39,7 @@ close(MAKEFILE);
 &run_make_with_options($makefile,"",&get_logfile);
 
 # Create the answer to what should be produced by this Makefile
-$answer = "cc -c main.c\ncc -c kbd.c\ncc -c commands.c\ncc -c display.c
+$answer = "cc -c main.cc\ncc -c kbd.c\ncc -c commands.c\ncc -c display.c
 cc -c insert.c\ncc -o edit main.o kbd.o commands.o display.o insert.o\n";
 
 # COMPARE RESULTS

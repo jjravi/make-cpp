@@ -613,8 +613,8 @@ edit : main.o kbd.o command.o display.o \
         cc -o edit main.o kbd.o command.o display.o \
                    insert.o search.o files.o utils.o
 
-main.o : main.c defs.h
-        cc -c main.c
+main.o : main.cc defs.h
+        cc -c main.cc
 kbd.o : kbd.c defs.h command.h
         cc -c kbd.c
 command.o : command.c defs.h command.h
@@ -661,15 +661,15 @@ make clean
 
 In the example makefile, the targets include the executable file
 @samp{edit}, and the object files @samp{main.o} and @samp{kbd.o}.  The
-prerequisites are files such as @samp{main.c} and @samp{defs.h}.
+prerequisites are files such as @samp{main.cc} and @samp{defs.h}.
 In fact, each @samp{.o} file is both a target and a prerequisite.
-Recipes include @w{@samp{cc -c main.c}} and @w{@samp{cc -c kbd.c}}.
+Recipes include @w{@samp{cc -c main.cc}} and @w{@samp{cc -c kbd.c}}.
 
 When a target is a file, it needs to be recompiled or relinked if any
 of its prerequisites change.  In addition, any prerequisites that are
 themselves automatically generated should be updated first.  In this
 example, @file{edit} depends on each of the eight object files; the
-object file @file{main.o} depends on the source file @file{main.c} and
+object file @file{main.o} depends on the source file @file{main.cc} and
 on the header file @file{defs.h}.
 
 A recipe may follow each line that contains a target and
@@ -820,8 +820,8 @@ objects = main.o kbd.o command.o display.o \
 
 edit : $(objects)
         cc -o edit $(objects)
-main.o : main.c defs.h
-        cc -c main.c
+main.o : main.cc defs.h
+        cc -c main.cc
 kbd.o : kbd.c defs.h command.h
         cc -c kbd.c
 command.o : command.c defs.h command.h
@@ -851,7 +851,7 @@ It is not necessary to spell out the recipes for compiling the individual
 C source files, because @code{make} can figure them out: it has an
 @dfn{implicit rule} for updating a @samp{.o} file from a correspondingly
 named @samp{.c} file using a @samp{cc -c} command.  For example, it will
-use the recipe @samp{cc -c main.c -o main.o} to compile @file{main.c} into
+use the recipe @samp{cc -c main.cc -o main.o} to compile @file{main.cc} into
 @file{main.o}.  We can therefore omit the recipes from the rules for the
 object files.  @xref{Implicit Rules, ,Using Implicit Rules}.@refill
 
@@ -1748,7 +1748,7 @@ secondary expansion for the @file{lib} target will yield
 You can also mix in functions here, as long as they are properly escaped:
 
 @example
-main_SRCS := main.c try.c test.c
+main_SRCS := main.cc try.c test.c
 lib_SRCS := lib.c api.c
 
 .SECONDEXPANSION:
@@ -3516,7 +3516,7 @@ implicit rule will be used if one applies.
 
 In the makefile for a program, many of the rules you need to write often
 say only that some object file depends on some header
-file.  For example, if @file{main.c} uses @file{defs.h} via an
+file.  For example, if @file{main.cc} uses @file{defs.h} via an
 @code{#include}, you would write:
 
 @example
@@ -3538,14 +3538,14 @@ Usually this is done with the @samp{-M} option to the compiler.
 For example, the command:
 
 @example
-cc -M main.c
+cc -M main.cc
 @end example
 
 @noindent
 generates the output:
 
 @example
-main.o : main.c defs.h
+main.o : main.cc defs.h
 @end example
 
 @noindent
@@ -3607,14 +3607,14 @@ gcc, Using GNU CC}, for details.
 The purpose of the @code{sed} command is to translate (for example):
 
 @example
-main.o : main.c defs.h
+main.o : main.cc defs.h
 @end example
 
 @noindent
 into:
 
 @example
-main.o main.d : main.c defs.h
+main.o main.d : main.cc defs.h
 @end example
 
 @noindent

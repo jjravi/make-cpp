@@ -17,7 +17,7 @@ this program.  If not, see <http://www.gnu.org/licenses/>.  */
 #include "makeint.h"
 
 #ifdef TEST
-/* Hack, the real error() routine eventually pulls in die from main.c */
+/* Hack, the real error() routine eventually pulls in die from main.cc */
 #define error(a, b, c, d)
 #endif
 

@@ -262,7 +262,7 @@ same_stream (FILE *f1, FILE *f2)
 /* A replacement for tmpfile, since the MSVCRT implementation creates
    the file in the root directory of the current drive, which might
    not be writable by our user.  Most of the code borrowed from
-   create_batch_file, see job.c.  */
+   create_batch_file, see job.cc.  */
 FILE *
 tmpfile (void)
 {

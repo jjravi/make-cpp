@@ -21,6 +21,10 @@ ACLOCAL_AMFLAGS = -I m4
 
 MAKE_HOST =	@MAKE_HOST@
 
+# How to find libcody
+CODYLIB = @CODYLIB@ -lcody
+CODYLIBINC = @CODYLIBINC@
+
 SUBDIRS =	lib po doc
 
 bin_PROGRAMS =	make
@@ -32,8 +36,9 @@ make_SRCS =	src/ar.c src/arscan.c src/commands.c src/commands.h \
 		src/debug.h src/default.c src/dep.h src/dir.c src/expand.c \
 		src/file.c src/filedef.h src/function.c src/getopt.c \
 		src/getopt.h src/getopt1.c src/gettext.h src/guile.c \
-		src/hash.c src/hash.h src/implicit.c src/job.c src/job.h \
-		src/load.c src/loadapi.c src/main.c src/makeint.h src/misc.c \
+		src/hash.c src/hash.h src/implicit.c src/job.cc src/job.h \
+		src/load.c src/loadapi.c src/main.cc src/makeint.h \
+		src/mapper-client.cc src/mapper-resolver.cc src/misc.c \
 		src/os.h src/output.c src/output.h src/read.c src/remake.c \
 		src/rule.c src/rule.h src/signame.c src/strcache.c \
 		src/variable.c src/variable.h src/version.c src/vpath.c
@@ -59,16 +64,16 @@ loadavg_SRCS =	lib/getloadavg.c
 make_SOURCES =	$(make_SRCS)
 EXTRA_make_SOURCES = $(amiga_SRCS) $(vms_SRCS)
 
-make_LDADD =	$(LIBOBJS) $(GUILE_LIBS) lib/libgnu.a $(GETLOADAVG_LIBS) \
+make_LDADD =	$(LIBOBJS) $(GUILE_LIBS) $(CODYLIB) lib/libgnu.a $(GETLOADAVG_LIBS) \
 		@LIBINTL@
 
 localedir =	$(datadir)/locale
 
-AM_CPPFLAGS =	-Isrc -I$(top_srcdir)/src -Ilib -I$(top_srcdir)/lib \
+AM_CPPFLAGS =	-Isrc $(GUILE_CFLAGS) $(CODYLIBINC) -I$(top_srcdir)/src -Ilib -I$(top_srcdir)/lib \
 		-DLIBDIR=\"$(libdir)\" -DINCLUDEDIR=\"$(includedir)\" \
 		-DLOCALEDIR=\"$(localedir)\"
 
-AM_CFLAGS =	$(GUILE_CFLAGS)
+AM_CFLAGS =	$(GUILE_CFLAGS) $(CODYLIBINC)
 
 if WINDOWSENV
   make_SOURCES += $(w32_SRCS)

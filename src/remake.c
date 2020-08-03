@@ -96,6 +96,7 @@ update_goal_chain (struct goaldep *goaldeps)
 
   /* Start a fresh batch of consideration.  */
   ++considered;
+  fprintf(stderr, "JR: start considered: %u\n", considered);
 
   /* Update all the goals until they are all finished.  */
 
@@ -105,11 +106,13 @@ update_goal_chain (struct goaldep *goaldeps)
 
       /* Start jobs that are waiting for the load to go down.  */
 
+      fprintf(stderr, "JR: start_waiting_job()\n");
       start_waiting_jobs ();
 
       /* Wait for a child to die.  */
 
       reap_children (1, 0);
+      fprintf(stderr, "JR: done reap_children()\n");
 
       lastgoal = 0;
       g = goals;
@@ -121,6 +124,7 @@ update_goal_chain (struct goaldep *goaldeps)
 
           goal_dep = g;
 
+          fprintf(stderr, "JR: iterate\n");
           for (file = g->file->double_colon ? g->file->double_colon : g->file;
                file != NULL;
                file = file->prev)
@@ -356,6 +360,21 @@ update_file (struct file *file, unsigned int depth)
   return status;
 }
 
+
+enum update_status
+force_update_file (struct file *file)
+{
+  return update_file (file, 0);
+}
+
+void
+force_remake_file (struct file *file)
+{
+  if (file->command_state == cs_not_started)
+    remake_file (file);
+}
+
+
 /* Show a message stating the target failed to build.  */
 
 static void
@@ -993,6 +1012,7 @@ notice_finished_file (struct file *file)
     /* Nothing was done for FILE, but it needed nothing done.
        So mark it now as "succeeded".  */
     file->update_status = us_success;
+  // TODO: JR mapper_finisher here?
 }
 
 /* Check whether another file (whose mtime is THIS_MTIME) needs updating on

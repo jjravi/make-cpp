@@ -26,9 +26,9 @@ src/getopt.c
 src/guile.c
 src/hash.c
 src/implicit.c
-src/job.c
+src/job.cc
 src/load.c
-src/main.c
+src/main.cc
 src/misc.c
 src/output.c
 src/output.h

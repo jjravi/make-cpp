@@ -1,5 +1,5 @@
-/* --------------- Moved here from job.c ---------------
-   This file must be #included in job.c, as it accesses static functions.
+/* --------------- Moved here from job.cc ---------------
+   This file must be #included in job.cc, as it accesses static functions.
 
 Copyright (C) 1996-2020 Free Software Foundation, Inc.
 This file is part of GNU Make.

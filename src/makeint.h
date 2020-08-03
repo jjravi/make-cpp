@@ -330,11 +330,12 @@ extern mode_t umask (mode_t);
 
 #define strneq(a, b, l) (strncmp ((a), (b), (l)) == 0)
 
-#if defined(ENUM_BITFIELDS) || (defined(__GNUC__) && !defined(__STRICT_ANSI__))
-# define ENUM_BITFIELD(bits)    :bits
-#else
+// TODO: fix for c++ hack
+// #if defined(ENUM_BITFIELDS) || (defined(__GNUC__) && !defined(__STRICT_ANSI__))
+// # define ENUM_BITFIELD(bits)    :bits
+// #else
 # define ENUM_BITFIELD(bits)
-#endif
+// #endif
 
 /* Handle gettext and locales.  */
 
