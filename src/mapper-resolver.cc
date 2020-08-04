@@ -315,12 +315,16 @@ int module_resolver::LTOCompileRequest (Cody::Server *s, std::vector<std::string
   //fprintf(stderr, "\tcalling fork_execute\n");
   //fork_execute (new_argv[0], new_argv, true);
   
+  printf("--start execute--\n");
+  fflush(stdout);
   system(temp_cmd.c_str());
+  printf("--done execute--\n");
+  fflush(stdout);
 
   //system((const char *)new_argv);
 
   // TODO: send back a compile status response
-  //s->LTOResponse();
+  s->LTOResponse();
   return 0;
 }
 

@@ -162,17 +162,10 @@ fnotice (FILE *file, const char *fmt, ...)
 
 /* Strip out the source directory from FILE.  */
 
-
-#define HAVE_EPOLL 1
 #define HAVE_PSELECT 1
 
-// Select or epoll
+// Select
 #ifdef NETWORKING
-
-#ifdef HAVE_EPOLL
-/* epoll_create, epoll_ctl, epoll_pwait  */
-#include <sys/epoll.h>
-#endif
 
 #if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
 /* pselect or select  */
@@ -1757,29 +1750,6 @@ start_job_command (struct child *child)
 #undef FREE_ARGV
 }
 
-#ifdef HAVE_EPOLL
-static inline void
-do_epoll_ctl (int epoll_fd, int code, int event, int fd, unsigned data)
-{
-  epoll_event ev;
-  ev.events = event;
-  ev.data.u32 = data;
-  if (epoll_ctl (epoll_fd, code, fd, &ev))
-    {
-      //noisy ("epoll_ctl error:%s", xstrerror (errno));
-      //fprintf(stderr, "epoll_ctl error:%d\n", errno);
-      fprintf(stderr, "epoll_ctl error:%s\n", std::strerror(errno));
-     // gcc_unreachable ();
-    }
-}
-#define my_epoll_ctl(EFD,C,EV,FD,CL) \
-  ((EFD) >= 0 ? do_epoll_ctl (EFD,C,EV,FD,CL) : (void)0)
-#else
-#define my_epoll_ctl(EFD,C,EV,FD,CL) ((void)(EFD), (void)(FD), (void)(CL))
-#endif
-
-
-
 #ifdef NETWORKING
 /* We increment this to tell the server to shut down.  */
 static volatile int term = false;
@@ -1814,44 +1784,38 @@ kill_signal (int sig)
   exit (2);
 }
 
-bool process_server (Cody::Server *server, unsigned slot, int epoll_fd)
+bool process_server (Cody::Server *server, unsigned slot)
 {
+  fprintf(stderr, "process_server ***\n");
   switch (server->GetDirection ())
-    {
+  {
     case Cody::Server::READING:
       if (int err = server->Read ())
-	return !(err == EINTR || err == EAGAIN);
+        return !(err == EINTR || err == EAGAIN);
       server->ProcessRequests ();
       server->PrepareToWrite ();
       break;
-
+    
     case Cody::Server::WRITING:
       if (int err = server->Write ())
-	return !(err == EINTR || err == EAGAIN);
+        return !(err == EINTR || err == EAGAIN);
       server->PrepareToRead ();
       break;
-
+    
     default:
       // We should never get here
       return true;
-    }
-
-  // We've changed direction, so update epoll
+  }
+  
   assert (server->GetFDRead () == server->GetFDWrite ());
-  my_epoll_ctl (epoll_fd, EPOLL_CTL_MOD,
-		server->GetDirection () == Cody::Server::READING
-		? EPOLLIN : EPOLLOUT, server->GetFDRead (), slot + 1);
-
+  
   return false;
 }
 
 
-void close_server (Cody::Server *server, int epoll_fd)
+void close_server (Cody::Server *server)
 {
-  my_epoll_ctl (epoll_fd, EPOLL_CTL_DEL, EPOLLIN, server->GetFDRead (), 0);
-
   close (server->GetFDRead ());
-  
   delete server;
 }
 
@@ -1896,252 +1860,6 @@ int open_server (bool ip6, int sock_fd)
     }
 
   return client_fd;
-}
-
-/* A server listening on bound socket SOCK_FD.  */
-
-static void
-server (bool ipv6, int sock_fd, module_resolver *resolver)
-{
-  int epoll_fd = -1;
-
-  signal (SIGTERM, term_signal);
-#ifdef HAVE_EPOLL
-  epoll_fd = epoll_create (1);
-#endif
-  if (epoll_fd >= 0)
-    my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, sock_fd, 0);
-
-#if defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-  sigset_t mask;
-  {
-    sigset_t block;
-    sigemptyset (&block);
-    sigaddset (&block, SIGTERM);
-    sigprocmask (SIG_BLOCK, &block, &mask);
-  }
-#endif
-
-  fprintf(stderr, "JR: here\n");
-
-#ifdef HAVE_EPOLL
-  const unsigned max_events = 20;
-  epoll_event events[max_events];
-#endif
-#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-  fd_set readers, writers;
-#endif
-  if (term_pipe)
-    pipe (term_pipe);
-
-  // We need stable references to servers, so this array can contain nulls
-  std::vector<Cody::Server *> connections;
-  unsigned live = 0;
-  while (sock_fd >= 0 || live)
-    {
-      fprintf(stderr, "HERE: job live: \n");
-      /* Wait for one or more events.  */
-      bool eintr = false;
-      int event_count;
-
-      if (epoll_fd >= 0)
-	{
-#ifdef HAVE_EPOLL
-	  event_count = epoll_pwait (epoll_fd, events, max_events, -1, &mask);
-#endif
-	}
-      else
-	{
-#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-	  FD_ZERO (&readers);
-	  FD_ZERO (&writers);
-
-	  unsigned limit = 0;
-	  if (sock_fd >= 0
-	      && !(term || (live && (flag_one || flag_sequential))))
-	    {
-	      FD_SET (sock_fd, &readers);
-	      limit = sock_fd + 1;
-	    }
-
-	  if (term_pipe && term_pipe[0] >= 0)
-	    {
-	      FD_SET (term_pipe[0], &readers);
-	      if (unsigned (term_pipe[0]) >= limit)
-		limit = term_pipe[0] + 1;
-	    }
-
-	  for (auto iter = connections.begin ();
-	       iter != connections.end (); ++iter)
-	    if (auto *server = *iter)
-	      {
-		int fd = -1;
-		switch (server->GetDirection ())
-		  {
-		  case Cody::Server::READING:
-		    fd = server->GetFDRead ();
-		    FD_SET (fd, &readers);
-		    break;
-		  case Cody::Server::WRITING:
-		    fd = server->GetFDWrite ();
-		    FD_SET (fd, &writers);
-		    break;
-		  default:
-		    break;
-		  }
-
-		if (fd >= 0 && limit <= unsigned (fd))
-		  limit = fd + 1;
-	      }
-#ifdef HAVE_PSELECT
-    // TODO: what?
-	  event_count = pselect (limit, &readers, &writers, NULL, NULL, &mask);
-#else
-	  event_count = select (limit, &readers, &writers, NULL, NULL);
-#endif
-	  if (term_pipe && FD_ISSET (term_pipe[0], &readers))
-	    {
-	      /* Fake up an interrupted system call.  */
-	      event_count = -1;
-	      errno = EINTR;
-	    }
-#endif
-	}
-
-      if (event_count < 0)
-	{
-	  // Error in waiting
-	  if (errno == EINTR)
-	    {
-	      flag_noisy && noisy ("Interrupted wait");
-	      eintr = true;
-	    }
-	  else
-	    fprintf(stderr, "cannot %s: %d\n", epoll_fd >= 0 ? "epoll_wait"
-#ifdef HAVE_PSELECT
-		   : "pselect",
-#else
-		   : "select",
-#endif
-		   (errno));
-	  event_count = 0;
-	}
-
-      auto iter = connections.begin ();
-      while (event_count--)
-	{
-	  // Process an event
-	  int active = -2;
-
-	  if (epoll_fd >= 0)
-	    {
-#ifdef HAVE_EPOLL
-	      /* See PR c++/88664 for why a temporary is used.  */
-	      unsigned data = events[event_count].data.u32;
-	      active = int (data) - 1;
-#endif
-	    }
-	  else
-	    {
-	      for (; iter != connections.end (); ++iter)
-		if (auto *server = *iter)
-		  {
-		    bool found = false;
-		    switch (server->GetDirection ())
-		      {
-#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-		      case Cody::Server::READING:
-			found = FD_ISSET (server->GetFDRead (), &readers);
-			break;
-		      case Cody::Server::WRITING:
-			found = FD_ISSET (server->GetFDWrite (), &writers);
-			break;
-#endif
-		      default:
-			break;
-		      }
-
-		    if (found)
-		      {
-			active = iter - connections.begin ();
-			++iter;
-			break;
-		      }
-		  }
-
-	      if (active < 0 && sock_fd >= 0 && FD_ISSET (sock_fd, &readers))
-		active = -1;
-	    }
-
-	  if (active >= 0)
-	    {
-	      // Do the action
-	      auto *server = connections[active];
-	      if (process_server (server, active, epoll_fd))
-		{
-		  connections[active] = nullptr;
-		  close_server (server, epoll_fd);
-		  live--;
-		  if (flag_sequential)
-		    my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, sock_fd, 0);
-		}
-	    }
-	  else if (active == -1 && !eintr)
-	    {
-	      // New connection
-	      int fd = open_server (ipv6, sock_fd);
-	      if (fd >= 0)
-		{
-#if !defined (HAVE_ACCEPT4) \
-  && (defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT))
-		  int flags = fcntl (fd, F_GETFL, 0);
-		  fcntl (fd, F_SETFL, flags | O_NONBLOCK);
-#endif
-		  auto *server = new Cody::Server (resolver, fd);
-
-		  unsigned slot = connections.size ();
-		  if (live == slot)
-		    connections.push_back (server);
-		  else
-		    for (auto iter = connections.begin (); ; ++iter)
-		      if (!*iter)
-			{
-			  *iter = server;
-			  slot = iter - connections.begin ();
-			  break;
-			}
-		  live++;
-		  my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, fd, slot + 1);
-		}
-	    }
-
-	  if (sock_fd >= 0
-	      && (term || (live && (flag_one || flag_sequential))))
-	    {
-	      /* Stop paying attention to sock_fd.  */
-	      my_epoll_ctl (epoll_fd, EPOLL_CTL_DEL, EPOLLIN, sock_fd, 0);
-	      if (flag_one || term)
-		{
-		  close (sock_fd);
-		  sock_fd = -1;
-		}
-	    }
-	}
-    }
-#if defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-  /* Restore the signal mask.  */
-  sigprocmask (SIG_SETMASK, &mask, NULL);
-#endif
-
-  assert (sock_fd < 0);
-  if (epoll_fd >= 0)
-    close (epoll_fd);
-
-  if (term_pipe && term_pipe[0] >= 0)
-    {
-      close (term_pipe[0]);
-      close (term_pipe[1]);
-    }
 }
 
 /* Try to start a child running.
@@ -2211,30 +1929,11 @@ start_waiting_job (struct child *c)
   sock_fd = fd;
 
   fprintf(stderr, "JR: NETWORKING MODE\n");
-  //if (sock_fd >= 0)
-  //{
-  //  fprintf(stderr, "JR: sock_fd >= 0\n");
-  //  server (name[0] != '=', sock_fd, &r);
-  //  fprintf(stderr, "JR: after server \n");
-  //  if (name[0] == '=')
-  //    unlink (name.c_str () + 1);
-  //}
-  //}
-  ///////////////////////////////////////////////////////////
-  //fprintf(stderr, "JR: after start_waiting_job\n");
-
 
   /////////// JR ////////////////
-  int epoll_fd = -1;
-
   signal (SIGTERM, term_signal);
-#ifdef HAVE_EPOLL
-  epoll_fd = epoll_create (1);
-#endif
-  if (epoll_fd >= 0)
-    my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, sock_fd, 0);
 
-#if defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
   sigset_t mask;
   {
     sigset_t block;
@@ -2246,306 +1945,14 @@ start_waiting_job (struct child *c)
 
   fprintf(stderr, "JR: here\n");
 
-#ifdef HAVE_EPOLL
-  const unsigned max_events = 20;
-  epoll_event events[max_events];
-#endif
 #if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
   fd_set readers, writers;
 #endif
   if (term_pipe)
     pipe (term_pipe);
 
-//  // We need stable references to servers, so this array can contain nulls
-//  std::vector<Cody::Server *> connections;
-//  unsigned live = 0;
-//  while (sock_fd >= 0 || live)
-//  {
-//    fprintf(stderr, "HERE: job live: \n");
-//    /* Wait for one or more events.  */
-//    bool eintr = false;
-//    int event_count;
-//
-//    if (epoll_fd >= 0)
-//    {
-//#ifdef HAVE_EPOLL
-//      event_count = epoll_pwait (epoll_fd, events, max_events, -1, &mask);
-//#endif
-//    }
-//    else
-//    {
-//#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-//      FD_ZERO (&readers);
-//      FD_ZERO (&writers);
-//
-//      unsigned limit = 0;
-//      if (sock_fd >= 0
-//        && !(term || (live && (flag_one || flag_sequential))))
-//      {
-//        FD_SET (sock_fd, &readers);
-//        limit = sock_fd + 1;
-//      }
-//
-//      if (term_pipe && term_pipe[0] >= 0)
-//      {
-//        FD_SET (term_pipe[0], &readers);
-//        if (unsigned (term_pipe[0]) >= limit)
-//          limit = term_pipe[0] + 1;
-//      }
-//
-//      for (auto iter = connections.begin ();
-//        iter != connections.end (); ++iter)
-//        if (auto *server = *iter)
-//        {
-//          int fd = -1;
-//          switch (server->GetDirection ())
-//          {
-//          case Cody::Server::READING:
-//            fd = server->GetFDRead ();
-//            FD_SET (fd, &readers);
-//            break;
-//          case Cody::Server::WRITING:
-//            fd = server->GetFDWrite ();
-//            FD_SET (fd, &writers);
-//            break;
-//          default:
-//            break;
-//          }
-//
-//          if (fd >= 0 && limit <= unsigned (fd))
-//            limit = fd + 1;
-//        }
-//#ifdef HAVE_PSELECT
-//      // TODO: what?
-//      event_count = pselect (limit, &readers, &writers, NULL, NULL, &mask);
-//#else
-//      event_count = select (limit, &readers, &writers, NULL, NULL);
-//#endif
-//      if (term_pipe && FD_ISSET (term_pipe[0], &readers))
-//      {
-//        /* Fake up an interrupted system call.  */
-//        event_count = -1;
-//        errno = EINTR;
-//      }
-//#endif
-//    }
-//
-//    if (event_count < 0)
-//    {
-//      // Error in waiting
-//      if (errno == EINTR)
-//      {
-//        flag_noisy && noisy ("Interrupted wait");
-//        eintr = true;
-//      }
-//      else
-//        fprintf(stderr, "cannot %s: %d\n", epoll_fd >= 0 ? "epoll_wait"
-//#ifdef HAVE_PSELECT
-//          : "pselect",
-//#else
-//          : "select",
-//#endif
-//          (errno));
-//      event_count = 0;
-//    }
-//
-//    auto iter = connections.begin ();
-//    while (event_count--)
-//    {
-//      // Process an event
-//      int active = -2;
-//
-//      if (epoll_fd >= 0)
-//      {
-//#ifdef HAVE_EPOLL
-//        /* See PR c++/88664 for why a temporary is used.  */
-//        unsigned data = events[event_count].data.u32;
-//        active = int (data) - 1;
-//#endif
-//      }
-//      else
-//      {
-//        for (; iter != connections.end (); ++iter)
-//          if (auto *server = *iter)
-//          {
-//            bool found = false;
-//            switch (server->GetDirection ())
-//            {
-//#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-//            case Cody::Server::READING:
-//              found = FD_ISSET (server->GetFDRead (), &readers);
-//              break;
-//            case Cody::Server::WRITING:
-//              found = FD_ISSET (server->GetFDWrite (), &writers);
-//              break;
-//#endif
-//            default:
-//              break;
-//            }
-//
-//            if (found)
-//            {
-//              active = iter - connections.begin ();
-//              ++iter;
-//              break;
-//            }
-//          }
-//
-//        if (active < 0 && sock_fd >= 0 && FD_ISSET (sock_fd, &readers))
-//          active = -1;
-//      }
-//
-//      if (active >= 0)
-//      {
-//        // Do the action
-//        auto *server = connections[active];
-//        if (process_server (server, active, epoll_fd))
-//        {
-//          connections[active] = nullptr;
-//          close_server (server, epoll_fd);
-//          live--;
-//          if (flag_sequential)
-//            my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, sock_fd, 0);
-//        }
-//      }
-//      else if (active == -1 && !eintr)
-//      {
-//        // New connection
-//        int fd = open_server (ipv6, sock_fd);
-//        if (fd >= 0)
-//        {
-//#if !defined (HAVE_ACCEPT4) \
-//          && (defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT))
-//          int flags = fcntl (fd, F_GETFL, 0);
-//          fcntl (fd, F_SETFL, flags | O_NONBLOCK);
-//#endif
-//          auto *server = new Cody::Server (resolver, fd);
-//
-//          unsigned slot = connections.size ();
-//          if (live == slot)
-//            connections.push_back (server);
-//          else
-//            for (auto iter = connections.begin (); ; ++iter)
-//              if (!*iter)
-//              {
-//                *iter = server;
-//                slot = iter - connections.begin ();
-//                break;
-//              }
-//          live++;
-//          my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, fd, slot + 1);
-//        }
-//      }
-//
-//      if (sock_fd >= 0
-//        && (term || (live && (flag_one || flag_sequential))))
-//      {
-//        /* Stop paying attention to sock_fd.  */
-//        my_epoll_ctl (epoll_fd, EPOLL_CTL_DEL, EPOLLIN, sock_fd, 0);
-//        if (flag_one || term)
-//        {
-//          close (sock_fd);
-//          sock_fd = -1;
-//        }
-//      }
-//    }
-//  }
-//#if defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT)
-//  /* Restore the signal mask.  */
-//  sigprocmask (SIG_SETMASK, &mask, NULL);
-//#endif
-//
-//  assert (sock_fd < 0);
-//  if (epoll_fd >= 0)
-//    close (epoll_fd);
-//
-//  if (term_pipe && term_pipe[0] >= 0)
-//  {
-//    close (term_pipe[0]);
-//    close (term_pipe[1]);
-//  }
-  /////////// JR ////////////////
-
-  ///////////////////////////////////////////////////////////
-//  {
-
-  ///////////////////////////////
-//  module_resolver r;
-//
-//  std::string name("localhost:54321");
-//  int sock_fd = -1; /* Socket fd, otherwise stdin/stdout.  */
-//
-//  char const *errmsg = nullptr;
-//  std::string option = name;
-//
-//  int fd; 
-//
-//  auto colon = option.find_last_of (':');
-//  if (colon != option.npos)
-//  {
-//    /* Try a hostname:port address.  */
-//    char const *cptr = option.c_str () + colon;
-//    char *endp;
-//    unsigned port = strtoul (cptr + 1, &endp, 10);
-//
-//    if (port && endp != cptr + 1 && !*endp)
-//    {
-//      /* Ends in ':number', treat as ipv6 domain socket.  */
-//      option.erase (colon);
-//      fd = Cody::ListenInet6 (&errmsg, option.c_str (), port);
-//    }
-//  }
-//
-//  sock_fd = fd;
-//
-//  //int fd = open_server (1, sock_fd);
-//  fd = open_server (false, sock_fd);
-//  auto *server = new Cody::Server (&r, fd);
-//
-  ////////////////////////////
-
-//  char const *errmsg = nullptr;
-//  std::string option = name;
-//
-//  int fd; 
-//
-//  auto colon = option.find_last_of (':');
-//  if (colon != option.npos)
-//  {
-//    /* Try a hostname:port address.  */
-//    char const *cptr = option.c_str () + colon;
-//    char *endp;
-//    unsigned port = strtoul (cptr + 1, &endp, 10);
-//
-//    if (port && endp != cptr + 1 && !*endp)
-//    {
-//      /* Ends in ':number', treat as ipv6 domain socket.  */
-//      option.erase (colon);
-//      fd = Cody::ListenInet6 (&errmsg, option.c_str (), port);
-//    }
-//  }
-//
-//  printf("JR: fd %d\n", fd);
-//
-//  sock_fd = fd;
-//
-//  fprintf(stderr, "JR: NETWORKING MODE\n");
-//  if (sock_fd >= 0)
-//  {
-//    fprintf(stderr, "JR: sock_fd >= 0\n");
-//    server (name[0] != '=', sock_fd, &r);
-//    fprintf(stderr, "JR: after server \n");
-//    if (name[0] == '=')
-//      unlink (name.c_str () + 1);
-//  }
-//  }
-  ///////////////////////////////////////////////////////////
- 
-
   /* Start the first command; reap_children will run later command lines.  */
   start_job_command (c);
-
-  sleep(1);
 
   switch (f->command_state)
     {
@@ -2582,41 +1989,6 @@ start_waiting_job (struct child *c)
 
   fprintf(stderr, "JR: nonblocking start_job_command() ?\n");
 
-  ///////////////////////////////
-//  //for(int ii=0; ii < 10; ii++) 
-//  for (;;)
-////  while(1) 
-//  {
-//
-//    while (int e = server->Read ())
-//      if (e != EAGAIN && e != EINTR)
-//        break;
-//
-//    fprintf(stderr, "JR: commands read\n");
-//
-//    if (server->GetResolver () != &r) {
-//      fprintf(stderr, "JR: resolver changed\n");
-//    //  std::cerr << "resolver changed\n";
-//    }
-//
-//    server->ProcessRequests ();
-//
-//    fprintf(stderr, "JR: processed requests\n");
-//    sleep(1);
-//   
-//    if (server->GetResolver () != &r) {
-//      fprintf(stderr, "JR: resolver changed\n");
-//    //  std::cerr << "resolver changed\n";
-//    }
-//    server->PrepareToWrite ();
-//    while (int e = server->Write ())
-//      if (e != EAGAIN && e != EINTR)
-//        continue;
-//      break;
-//  }
-  ///////////////////////////////
-
-
   int total_wait_time = 0; 
 
   /////////// JR ///////////////
@@ -2630,47 +2002,7 @@ start_waiting_job (struct child *c)
     bool eintr = false;
     int event_count;
 
-    if (epoll_fd >= 0)
     {
-#ifdef HAVE_EPOLL
-    fprintf(stderr, "stuck here? 1\n");
-//      event_count = epoll_pwait (epoll_fd, events, max_events, -1, &mask);
-      event_count = epoll_pwait (epoll_fd, events, max_events, 1000, &mask);
-    fprintf(stderr, "nope! 1\n");
-      total_wait_time += 1000;
-      if(total_wait_time > 5000) {
-        //break;
-
-        for (auto iter = connections.begin (); iter != connections.end() ; ++iter)
-          if (*iter)
-          {
-            close_server (*iter, epoll_fd);
-          }
-
-        fprintf(stderr, "closing my_epoll_ctl\n");
-        //my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, sock_fd, 0);
-        /* Stop paying attention to sock_fd.  */
-        my_epoll_ctl (epoll_fd, EPOLL_CTL_DEL, EPOLLIN, sock_fd, 0);
-        close (sock_fd);
-
-        sigprocmask (SIG_SETMASK, &mask, NULL);
-
-        if (epoll_fd >= 0)
-          close (epoll_fd);
-        if (term_pipe && term_pipe[0] >= 0)
-        {
-          close (term_pipe[0]);
-          close (term_pipe[1]);
-        }
-
-        fprintf(stderr, "closed my_epoll_ctl\n");
-        return 1;
-      }
-#endif
-    }
-    else
-    {
-#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
       FD_ZERO (&readers);
       FD_ZERO (&writers);
 
@@ -2711,18 +2043,48 @@ start_waiting_job (struct child *c)
           if (fd >= 0 && limit <= unsigned (fd))
             limit = fd + 1;
         }
-#ifdef HAVE_PSELECT
+
+      fprintf(stderr, "pselect wait\n");
+      struct timespec pselect_timeout = {0};
+      pselect_timeout.tv_sec = 0;
+      pselect_timeout.tv_nsec = 100000000;
+
+      //event_count = pselect (limit, &readers, &writers, NULL, &pselect_timeout, &mask);
       event_count = pselect (limit, &readers, &writers, NULL, NULL, &mask);
-#else
-      event_count = select (limit, &readers, &writers, NULL, NULL);
-#endif
+      fprintf(stderr, "pselect wait done\n");
+      //sleep(1);
+
+      total_wait_time += 1000;
+      if(total_wait_time > 5000) {
+        //break;
+
+        for (auto iter = connections.begin (); iter != connections.end() ; ++iter)
+          if (*iter)
+          {
+            close_server (*iter);
+          }
+
+        fprintf(stderr, "closing sock_fd\n");
+        close (sock_fd);
+
+        sigprocmask (SIG_SETMASK, &mask, NULL);
+
+        if (term_pipe && term_pipe[0] >= 0)
+        {
+          close (term_pipe[0]);
+          close (term_pipe[1]);
+        }
+
+        fprintf(stderr, "closed sock_fd\n");
+        return 1;
+      }
+
       if (term_pipe && FD_ISSET (term_pipe[0], &readers))
       {
         /* Fake up an interrupted system call.  */
         event_count = -1;
         errno = EINTR;
       }
-#endif
     }
 
     if (event_count < 0)
@@ -2733,14 +2095,6 @@ start_waiting_job (struct child *c)
         flag_noisy && noisy ("Interrupted wait");
         eintr = true;
       }
-      else
-        fprintf(stderr, "cannot %s: %d\n", epoll_fd >= 0 ? "epoll_wait"
-#ifdef HAVE_PSELECT
-          : "pselect",
-#else
-          : "select",
-#endif
-          (errno));
       event_count = 0;
     }
 
@@ -2750,15 +2104,6 @@ start_waiting_job (struct child *c)
       // Process an event
       int active = -2;
 
-      if (epoll_fd >= 0)
-      {
-#ifdef HAVE_EPOLL
-        /* See PR c++/88664 for why a temporary is used.  */
-        unsigned data = events[event_count].data.u32;
-        active = int (data) - 1;
-#endif
-      }
-      else
       {
         for (; iter != connections.end (); ++iter)
           if (auto *server = *iter)
@@ -2766,14 +2111,12 @@ start_waiting_job (struct child *c)
             bool found = false;
             switch (server->GetDirection ())
             {
-#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
             case Cody::Server::READING:
               found = FD_ISSET (server->GetFDRead (), &readers);
               break;
             case Cody::Server::WRITING:
               found = FD_ISSET (server->GetFDWrite (), &writers);
               break;
-#endif
             default:
               break;
             }
@@ -2794,14 +2137,33 @@ start_waiting_job (struct child *c)
       {
         // Do the action
         auto *server = connections[active];
-        if (process_server (server, active, epoll_fd))
+        if (process_server (server, active))
         {
           connections[active] = nullptr;
-          fprintf(stderr, "closing epoll_fd\n");
-          close_server (server, epoll_fd);
+          fprintf(stderr, "closing\n");
+          close_server (server);
           live--;
-          if (flag_sequential)
-            my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, sock_fd, 0);
+      
+          for (auto iter = connections.begin (); iter != connections.end() ; ++iter)
+            if (*iter)
+            {
+              close_server (*iter);
+            }
+
+          fprintf(stderr, "closing sock_fd\n");
+          close (sock_fd);
+
+          sigprocmask (SIG_SETMASK, &mask, NULL);
+
+          if (term_pipe && term_pipe[0] >= 0)
+          {
+            close (term_pipe[0]);
+            close (term_pipe[1]);
+          }
+
+          fprintf(stderr, "closed sock_fd\n");
+          sleep(2);
+          return 1;
         }
       }
       else if (active == -1 && !eintr)
@@ -2810,11 +2172,9 @@ start_waiting_job (struct child *c)
         int fd = open_server (false, sock_fd);
         if (fd >= 0)
         {
-#if !defined (HAVE_ACCEPT4) \
-          && (defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT))
           int flags = fcntl (fd, F_GETFL, 0);
           fcntl (fd, F_SETFL, flags | O_NONBLOCK);
-#endif
+
           auto *server = new Cody::Server (&r, fd);
 
           unsigned slot = connections.size ();
@@ -2829,15 +2189,12 @@ start_waiting_job (struct child *c)
                 break;
               }
           live++;
-          my_epoll_ctl (epoll_fd, EPOLL_CTL_ADD, EPOLLIN, fd, slot + 1);
         }
       }
 
-      if (sock_fd >= 0
-        && (term || (live && (flag_one || flag_sequential))))
+      if (sock_fd >= 0 && (term || (live && (flag_one || flag_sequential))))
       {
         /* Stop paying attention to sock_fd.  */
-        my_epoll_ctl (epoll_fd, EPOLL_CTL_DEL, EPOLLIN, sock_fd, 0);
         if (flag_one || term)
         {
           close (sock_fd);
@@ -2846,14 +2203,11 @@ start_waiting_job (struct child *c)
       }
     }
   }
-#if defined (HAVE_EPOLL) || defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+
   /* Restore the signal mask.  */
   sigprocmask (SIG_SETMASK, &mask, NULL);
-#endif
 
-//  assert (sock_fd < 0);
-  if (epoll_fd >= 0)
-    close (epoll_fd);
+  assert (sock_fd < 0);
 
   if (term_pipe && term_pipe[0] >= 0)
   {
@@ -2916,7 +2270,6 @@ new_job (struct file *file)
       char *in, *out, *ref;
 
       fprintf(stderr, "JR: cmd_job: %u\n", i);
-
       /* IN points to where in the line we are scanning.
          OUT points to where in the line we are writing.
          When we collapse a backslash-newline combination,
@@ -3111,92 +2464,6 @@ new_job (struct file *file)
      (This will notice if there is in fact no recipe.)  */
   start_waiting_job (c);
   fprintf(stderr, "JR: after start_waiting_job\n");
-
-  ///////////////////////////////////////////////////////////
-
-  // TODO: REMOVE THIS
-  //module hack
-//  {
-//  module_resolver r;
-//
-//  std::string name("localhost:54321");
-//  int sock_fd = -1; /* Socket fd, otherwise stdin/stdout.  */
-//
-//  char const *errmsg = nullptr;
-//  std::string option = name;
-//
-//  int fd; 
-//
-//  auto colon = option.find_last_of (':');
-//  if (colon != option.npos)
-//  {
-//    /* Try a hostname:port address.  */
-//    char const *cptr = option.c_str () + colon;
-//    char *endp;
-//    unsigned port = strtoul (cptr + 1, &endp, 10);
-//
-//    if (port && endp != cptr + 1 && !*endp)
-//    {
-//      /* Ends in ':number', treat as ipv6 domain socket.  */
-//      option.erase (colon);
-//      fd = Cody::ListenInet6 (&errmsg, option.c_str (), port);
-//    }
-//  }
-//
-//  printf("JR: fd %d\n", fd);
-//
-//  sock_fd = fd;
-//
-//  fprintf(stderr, "JR: NETWORKING MODE\n");
-//  if (sock_fd >= 0)
-//  {
-//    fprintf(stderr, "JR: sock_fd >= 0\n");
-//    server (name[0] != '=', sock_fd, &r);
-//    fprintf(stderr, "JR: after server \n");
-//    if (name[0] == '=')
-//      unlink (name.c_str () + 1);
-//  }
-
-//  else
-//#endif
-//  {
-//    assert (sock_fd < 0);
-//    auto server = Cody::Server (&r, 0, 1);
-//
-//    int err = 0;
-//    for (;;)
-//    {
-//      server.PrepareToRead ();
-//      while ((err = server.Read ()))
-//      {
-//        if (err == EINTR || err == EAGAIN)
-//          continue;
-//        goto done;
-//      }
-//
-//      fprintf(stderr, "before ProcessRequests()\n");
-//
-//      server.ProcessRequests ();
-//
-//      fprintf(stderr, "before PrepareToWrite()\n");
-//
-//      server.PrepareToWrite ();
-//
-//      fprintf(stderr, "before server.Write()\n");
-//      while ((err = server.Write ()))
-//      {
-//        if (err == EINTR || err == EAGAIN)
-//          continue;
-//        goto done;
-//      }
-//    }
-//done:;
-//     if (err > 0)
-//       fprintf(stderr, "communication error:%d", err);
-//  }
-//  }
-  ///////////////////////////////////////////////////////////
-  //fprintf(stderr, "JR: after start_waiting_job\n");
 
   if (job_slots == 1 || not_parallel)
     /* Since there is only one job slot, make things run linearly.
